@@ -1,10 +1,11 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
+  profile: any;
   loading: boolean;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
@@ -25,6 +26,30 @@ export const useAuth = () => {
 
 const initAuth = async (): Promise<{ user: User | null; session: Session | null; error: string | null }> => {
   try {
+    // Check if Supabase is configured first
+    if (!isSupabaseConfigured()) {
+      // Return demo user for development
+      const demoUser = {
+        id: 'demo-user-id',
+        email: 'demo@oxa-groupe.com',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {},
+        aud: 'authenticated'
+      } as User;
+      
+      const demoSession = {
+        access_token: 'demo-token',
+        refresh_token: 'demo-refresh',
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: demoUser
+      } as Session;
+      
+      return { user: demoUser, session: demoSession, error: null };
+    }
+
     // Test connection with a simple query first
     const { error: connectionError } = await supabase
       .from('profiles')
@@ -64,6 +89,7 @@ const initAuth = async (): Promise<{ user: User | null; session: Session | null;
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,9 +109,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setError(authError);
           setUser(null);
           setSession(null);
+          setProfile(null);
         } else {
           setUser(authUser);
           setSession(authSession);
+          
+          // Set demo profile if in demo mode
+          if (authUser && !isSupabaseConfigured()) {
+            setProfile({
+              id: 'demo-profile-id',
+              user_id: authUser.id,
+              email: authUser.email,
+              nom: 'Utilisateur',
+              prenom: 'Démo',
+              role: 'commercial',
+              actif: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          }
         }
       } catch (err: any) {
         if (!mounted) return;
@@ -93,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setError(err.message || 'Erreur de connexion');
         setUser(null);
         setSession(null);
+        setProfile(null);
       } finally {
         if (mounted) {
           setLoading(false);
@@ -110,6 +153,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
         setUser(session?.user || null);
+        
+        // Set demo profile if in demo mode and user exists
+        if (session?.user && !isSupabaseConfigured()) {
+          setProfile({
+            id: 'demo-profile-id',
+            user_id: session.user.id,
+            email: session.user.email,
+            nom: 'Utilisateur',
+            prenom: 'Démo',
+            role: 'commercial',
+            actif: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          setProfile(null);
+        }
+        
         setError(null);
       }
     );
@@ -125,6 +186,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(null);
       setLoading(true);
       
+      // Demo mode - accept any credentials
+      if (!isSupabaseConfigured()) {
+        const demoUser = {
+          id: 'demo-user-id',
+          email: email,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: {},
+          aud: 'authenticated'
+        } as User;
+        
+        const demoSession = {
+          access_token: 'demo-token',
+          refresh_token: 'demo-refresh',
+          expires_in: 3600,
+          token_type: 'bearer',
+          user: demoUser
+        } as Session;
+        
+        setUser(demoUser);
+        setSession(demoSession);
+        return;
+      }
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -149,6 +235,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(null);
       setLoading(true);
 
+      // Demo mode - simulate user creation
+      if (!isSupabaseConfigured()) {
+        const demoUser = {
+          id: 'demo-user-id',
+          email: email,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: {},
+          aud: 'authenticated'
+        } as User;
+        
+        const demoSession = {
+          access_token: 'demo-token',
+          refresh_token: 'demo-refresh',
+          expires_in: 3600,
+          token_type: 'bearer',
+          user: demoUser
+        } as Session;
+        
+        setUser(demoUser);
+        setSession(demoSession);
+        return;
+      }
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -207,6 +317,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value: AuthContextType = {
     user,
     session,
+    profile,
     loading,
     error,
     signIn,
