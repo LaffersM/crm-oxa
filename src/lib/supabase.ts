@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 // Types consolidés
 export interface Article {
@@ -76,71 +76,24 @@ export interface Profile {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Validation de la configuration
-export const isSupabaseConfigured = (): boolean => {
-  return !!(supabaseUrl && supabaseAnonKey && 
-    supabaseUrl.startsWith('https://') && 
-    supabaseAnonKey.length > 20);
-};
-
-// Créer le client Supabase seulement si configuré
-let supabaseClient: SupabaseClient | null = null;
-
-if (isSupabaseConfigured()) {
-  supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      detectSessionInUrl: true,
-      autoRefreshToken: true,
-      storage: window.localStorage,
+// Créer le client Supabase
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    detectSessionInUrl: true,
+    autoRefreshToken: true,
+  },
+  global: {
+    headers: {
+      'X-Client-Info': 'oxa-groupe-crm',
     },
-    global: {
-      headers: {
-        'X-Client-Info': 'oxa-groupe-crm',
-      },
-    },
-    db: {
-      schema: 'public',
-    },
-    realtime: {
-      params: {
-        eventsPerSecond: 10,
-      },
-    },
-  });
-} else {
-  console.warn('Supabase non configuré - Mode démo activé');
-}
+  },
+});
 
-// Export du client avec vérification
-export const supabase = supabaseClient as SupabaseClient;
-
-// Fonction utilitaire pour tester la connexion
-export const testSupabaseConnection = async (): Promise<boolean> => {
-  if (!isSupabaseConfigured() || !supabaseClient) {
-    return false;
-  }
-
-  try {
-    const { error } = await supabaseClient
-      .from('profiles')
-      .select('id')
-      .limit(1);
-    
-    return !error;
-  } catch {
-    return false;
-  }
-};
-
-// Fonction pour récupérer le profil utilisateur de manière optimisée
+// Fonction pour récupérer le profil utilisateur
 export const getUserProfile = async (userId: string): Promise<Profile | null> => {
-  if (!isSupabaseConfigured() || !supabaseClient) {
-    return null;
-  }
-
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('user_id', userId)
