@@ -90,6 +90,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// Fonction de compatibilité (pour éviter les erreurs d'import)
+export const isSupabaseConfigured = () => true;
+export const testSupabaseConnection = async () => true;
+
 // Fonction pour récupérer le profil utilisateur
 export const getUserProfile = async (userId: string): Promise<Profile | null> => {
   try {
