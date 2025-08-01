@@ -1,10 +1,10 @@
 import React from 'react'
-import { Devis, Client } from '../../lib/supabase'
+import { OXADevis, Client } from '../../lib/supabase'
 import { X, Edit, FileText, User, Calendar, Euro, Download, Send } from 'lucide-react'
 import { generateDevisPDF } from '../../utils/pdfExport'
 
 interface DevisDetailsProps {
-  devis: Devis
+  devis: OXADevis
   client?: Client
   onClose: () => void
   onEdit: () => void
@@ -50,35 +50,35 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
       // Convertir le devis en format compatible avec generateDevisPDF
       const devisData = {
         numero: devis.numero,
-        date_devis: new Date(devis.date_creation).toISOString().split('T')[0],
-        objet: devis.notes?.split('\n')[0] || 'Devis',
+        date_devis: devis.date_devis,
+        objet: devis.objet,
         client: client,
-        description_operation: devis.notes?.split('\n').slice(1).join('\n') || '',
+        description_operation: devis.description_operation || '',
         lignes: devis.lignes ? devis.lignes.map(ligne => ({
           id: ligne.id,
-          designation: ligne.description,
+          designation: ligne.designation,
           zone: ligne.zone || '',
           quantite: ligne.quantite,
           prix_unitaire: ligne.prix_unitaire,
-          prix_total: ligne.total_ht,
+          prix_total: ligne.prix_total,
           remarques: ligne.remarques || '',
-          type: 'materiel'
+          type: ligne.type || 'materiel'
         })) : [],
         total_ht: devis.total_ht,
         total_tva: devis.total_tva,
         total_ttc: devis.total_ttc,
-        cee_kwh_cumac: 0, // Extraire depuis les notes si possible
-        cee_prix_unitaire: 7.30,
-        cee_montant_total: devis.prime_cee,
-        reste_a_payer_ht: devis.total_ht - devis.prime_cee,
-        delais: '4 à 6 semaines après validation du devis',
-        modalites_paiement: '30% à la commande, 70% à la livraison',
-        garantie: '2 ans pièces et main d\'œuvre',
-        penalites: 'Pénalités de retard : 0,1% par jour de retard',
-        clause_juridique: 'Tout litige relève de la compétence du Tribunal de Commerce de Paris'
+        cee_kwh_cumac: devis.cee_kwh_cumac || 0,
+        cee_prix_unitaire: devis.cee_prix_unitaire || 7.30,
+        cee_montant_total: devis.cee_montant_total || 0,
+        reste_a_payer_ht: devis.reste_a_payer_ht || devis.total_ht,
+        delais: devis.delais || '4 à 6 semaines après validation du devis',
+        modalites_paiement: devis.modalites_paiement || '30% à la commande, 70% à la livraison',
+        garantie: devis.garantie || '2 ans pièces et main d\'œuvre',
+        penalites: devis.penalites || 'Pénalités de retard : 0,1% par jour de retard',
+        clause_juridique: devis.clause_juridique || 'Tout litige relève de la compétence du Tribunal de Commerce de Paris'
       }
 
-      const isCEE = devis.prime_cee > 0
+      const isCEE = (devis.cee_montant_total || 0) > 0
       await generateDevisPDF(devisData, isCEE)
     } catch (error) {
       console.error('Erreur lors de l\'export PDF:', error)
@@ -112,7 +112,10 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
             {devis.lignes.map((ligne) => (
               <tr key={ligne.id}>
                 <td className="px-4 py-3 text-sm text-gray-900">
-                  {ligne.description}
+                  {ligne.designation}
+                  {ligne.description && (
+                    <div className="text-xs text-gray-500 mt-1">{ligne.description}</div>
+                  )}
                   {ligne.remarques && (
                     <div className="text-xs text-gray-500 mt-1">{ligne.remarques}</div>
                   )}
@@ -120,7 +123,7 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
                 <td className="px-4 py-3 text-sm text-gray-600">{ligne.zone || '-'}</td>
                 <td className="px-4 py-3 text-sm text-gray-900">{ligne.quantite}</td>
                 <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(ligne.prix_unitaire)}</td>
-                <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(ligne.total_ht)}</td>
+                <td className="px-4 py-3 text-sm font-medium text-gray-900">{formatCurrency(ligne.prix_total)}</td>
               </tr>
             ))}
           </tbody>
@@ -162,6 +165,9 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
                   {client.nom} - {client.entreprise}
                 </p>
               )}
+              {devis.objet && (
+                <p className="text-md text-gray-500 mt-1">{devis.objet}</p>
+              )}
             </div>
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(devis.statut)}`}>
               {getStatusLabel(devis.statut)}
@@ -175,9 +181,9 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
               <div className="flex items-start">
                 <Calendar className="h-5 w-5 text-gray-400 mr-3 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-600">Date de création</p>
+                  <p className="text-sm text-gray-600">Date du devis</p>
                   <p className="font-medium text-gray-900">
-                    {new Date(devis.date_creation).toLocaleDateString('fr-FR', {
+                    {new Date(devis.date_devis).toLocaleDateString('fr-FR', {
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric'
@@ -243,11 +249,11 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
               </div>
             </div>
 
-            {devis.prime_cee > 0 && (
+            {devis.cee_montant_total > 0 && (
               <div className="mt-6 pt-6 border-t border-blue-200">
                 <div className="text-center">
                   <p className="text-sm text-blue-700">Prime CEE estimée</p>
-                  <p className="text-xl font-bold text-green-700">{formatCurrency(devis.prime_cee)}</p>
+                  <p className="text-xl font-bold text-green-700">{formatCurrency(devis.cee_montant_total)}</p>
                 </div>
               </div>
             )}
@@ -272,6 +278,19 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
             </div>
           )}
 
+          {/* Description de l'opération */}
+          {devis.description_operation && (
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
+                <FileText className="h-4 w-4 mr-2" />
+                Description de l'opération
+              </h4>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <p className="text-gray-700 whitespace-pre-wrap">{devis.description_operation}</p>
+              </div>
+            </div>
+          )}
+
           {/* Lignes du devis */}
           <div>
             <h4 className="font-medium text-gray-900 mb-3 flex items-center">
@@ -283,15 +302,16 @@ export function DevisDetails({ devis, client, onClose, onEdit }: DevisDetailsPro
             </div>
           </div>
 
-          {/* Notes */}
-          {devis.notes && (
+          {/* Notes et remarques */}
+          {(devis.notes || devis.remarques) && (
             <div>
               <h4 className="font-medium text-gray-900 mb-3 flex items-center">
                 <FileText className="h-4 w-4 mr-2" />
-                Notes
+                Notes et remarques
               </h4>
               <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-gray-700 whitespace-pre-wrap">{devis.notes}</p>
+                {devis.notes && <p className="text-gray-700 whitespace-pre-wrap mb-2">{devis.notes}</p>}
+                {devis.remarques && <p className="text-gray-700 whitespace-pre-wrap">{devis.remarques}</p>}
               </div>
             </div>
           )}
