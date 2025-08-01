@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured, testSupabaseConnection, getUserProfile, Profile } from '../lib/supabase';
+import { supabase, getUserProfile, Profile } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -8,7 +8,6 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   error: string | null;
-  isDemo: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, userData: Partial<Profile>) => Promise<void>;
   signOut: () => Promise<void>;
@@ -26,52 +25,15 @@ export const useAuth = () => {
   return context;
 };
 
-// Demo data générée une seule fois
-const DEMO_USER: User = {
-  id: 'demo-user-id',
-  email: 'demo@oxa-groupe.com',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  app_metadata: {},
-  user_metadata: {},
-  aud: 'authenticated'
-} as User;
-
-const DEMO_SESSION: Session = {
-  access_token: 'demo-token',
-  refresh_token: 'demo-refresh',
-  expires_in: 3600,
-  token_type: 'bearer',
-  user: DEMO_USER
-} as Session;
-
-const DEMO_PROFILE: Profile = {
-  id: 'demo-profile-id',
-  user_id: DEMO_USER.id,
-  email: DEMO_USER.email!,
-  nom: 'Utilisateur',
-  prenom: 'Démo',
-  role: 'commercial',
-  actif: true,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString()
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
 
   // Fonction pour charger le profil utilisateur
   const loadUserProfile = useCallback(async (userId: string) => {
-    if (isDemo) {
-      setProfile(DEMO_PROFILE);
-      return;
-    }
-
     try {
       const profileData = await getUserProfile(userId);
       setProfile(profileData);
@@ -79,59 +41,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Erreur chargement profil:', error);
       setProfile(null);
     }
-  }, [isDemo]);
+  }, []);
 
   // Fonction pour rafraîchir le profil
   const refreshProfile = useCallback(async () => {
-    if (user && !isDemo) {
+    if (user) {
       await loadUserProfile(user.id);
     }
-  }, [user, isDemo, loadUserProfile]);
+  }, [user, loadUserProfile]);
 
   // Initialisation de l'authentification
   useEffect(() => {
     let mounted = true;
-    let connectionTestTimeout: NodeJS.Timeout;
 
     const initializeAuth = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        // Vérifier la configuration Supabase
-        if (!isSupabaseConfigured()) {
-          console.log('Mode démo activé - Supabase non configuré');
-          setIsDemo(true);
-          setUser(DEMO_USER);
-          setSession(DEMO_SESSION);
-          setProfile(DEMO_PROFILE);
-          return;
-        }
-
-        // Test de connexion avec timeout
-        const connectionPromise = testSupabaseConnection();
-        const timeoutPromise = new Promise<boolean>((_, reject) => {
-          connectionTestTimeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        });
-
-        const isConnected = await Promise.race([connectionPromise, timeoutPromise]);
-        
-        if (!isConnected) {
-          throw new Error('Connexion échouée');
-        }
-
         // Récupérer la session actuelle
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
-          throw sessionError;
+          console.error('Erreur de session:', sessionError);
+          setError('Erreur de connexion à la base de données');
+          return;
         }
 
         if (!mounted) return;
 
         setUser(currentSession?.user || null);
         setSession(currentSession);
-        setIsDemo(false);
 
         // Charger le profil si utilisateur connecté
         if (currentSession?.user) {
@@ -141,18 +81,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (error: any) {
         if (!mounted) return;
         
-        console.warn('Basculement vers le mode démo:', error.message);
-        setIsDemo(true);
-        setUser(DEMO_USER);
-        setSession(DEMO_SESSION);
-        setProfile(DEMO_PROFILE);
-        setError(null); // Ne pas afficher d'erreur en mode démo
+        console.error('Erreur initialisation auth:', error);
+        setError(error.message || 'Erreur de connexion');
       } finally {
         if (mounted) {
           setLoading(false);
-        }
-        if (connectionTestTimeout) {
-          clearTimeout(connectionTestTimeout);
         }
       }
     };
@@ -160,37 +93,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initializeAuth();
 
     // Écouter les changements d'authentification
-    let authSubscription: any = null;
-    
-    if (isSupabaseConfigured()) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        async (event, newSession) => {
-          if (!mounted) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        if (!mounted) return;
 
-          console.log('Auth state changed:', event);
-          
-          setSession(newSession);
-          setUser(newSession?.user || null);
-          
-          if (newSession?.user && !isDemo) {
-            await loadUserProfile(newSession.user.id);
-          } else {
-            setProfile(null);
-          }
+        console.log('Auth state changed:', event);
+        
+        setSession(newSession);
+        setUser(newSession?.user || null);
+        
+        if (newSession?.user) {
+          await loadUserProfile(newSession.user.id);
+        } else {
+          setProfile(null);
         }
-      );
-      
-      authSubscription = subscription;
-    }
+        
+        setError(null);
+      }
+    );
 
     return () => {
       mounted = false;
-      if (connectionTestTimeout) {
-        clearTimeout(connectionTestTimeout);
-      }
-      if (authSubscription) {
-        authSubscription.unsubscribe();
-      }
+      subscription.unsubscribe();
     };
   }, [loadUserProfile]);
 
@@ -198,14 +122,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setError(null);
       setLoading(true);
-
-      if (isDemo) {
-        // Mode démo - accepter n'importe quels identifiants
-        setUser(DEMO_USER);
-        setSession(DEMO_SESSION);
-        setProfile(DEMO_PROFILE);
-        return;
-      }
 
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
@@ -223,20 +139,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setLoading(false);
     }
-  }, [isDemo]);
+  }, []);
 
   const signUp = useCallback(async (email: string, password: string, userData: Partial<Profile>) => {
     try {
       setError(null);
       setLoading(true);
-
-      if (isDemo) {
-        // Mode démo - simuler la création
-        setUser(DEMO_USER);
-        setSession(DEMO_SESSION);
-        setProfile({ ...DEMO_PROFILE, ...userData });
-        return;
-      }
 
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -275,17 +183,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setLoading(false);
     }
-  }, [isDemo]);
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
       setError(null);
       
-      if (!isDemo) {
-        const { error } = await supabase.auth.signOut();
-        if (error) {
-          throw error;
-        }
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw error;
       }
       
       // Reset state
@@ -298,7 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(error.message || 'Erreur lors de la déconnexion');
       throw error;
     }
-  }, [isDemo]);
+  }, []);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -310,7 +216,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     profile,
     loading,
     error,
-    isDemo,
     signIn,
     signUp,
     signOut,
