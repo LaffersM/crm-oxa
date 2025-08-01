@@ -206,17 +206,34 @@ export function DevisPage() {
         return
       }
 
-      // Transform data for Supabase - map client object to client_id and handle lignes properly
+      // Transform data for Supabase - only keep valid database columns
       const supabaseData = {
-        ...devisData,
+        numero: devisData.numero,
         client_id: devisData.client?.id || devisData.client_id,
+        statut: devisData.statut || 'brouillon',
+        date_creation: new Date().toISOString(),
+        date_devis: devisData.date_devis,
+        objet: devisData.objet,
+        description_operation: devisData.description_operation,
+        total_ht: devisData.total_ht || 0,
+        total_tva: devisData.total_tva || 0,
+        total_ttc: devisData.total_ttc || 0,
+        tva_taux: devisData.tva_taux || 20,
+        marge_totale: devisData.marge_totale || 0,
+        cee_kwh_cumac: devisData.cee_kwh_cumac || 0,
+        cee_prix_unitaire: devisData.cee_prix_unitaire || 0.002,
+        cee_montant_total: devisData.cee_montant_total || 0,
+        reste_a_payer_ht: devisData.reste_a_payer_ht || devisData.total_ht || 0,
+        remarques: devisData.remarques,
+        type: devisData.type || 'MATERIEL',
+        modalites_paiement: devisData.modalites_paiement || '30% à la commande, 70% à la livraison',
+        garantie: devisData.garantie || '2 ans pièces et main d\'œuvre',
+        penalites: devisData.penalites || 'Pénalités de retard : 0,1% par jour de retard',
+        clause_juridique: devisData.clause_juridique || 'Tout litige relève de la compétence du Tribunal de Commerce de Paris',
+        delais: devisData.delais || '4 à 6 semaines après validation du devis',
+        lignes_data: devisData.lignes_data || [],
         commercial_id: profile?.id
       }
-      
-      // Remove client object and lignes_data if they exist (not database columns)
-      delete supabaseData.client
-      // Remove lignes field as it doesn't exist in database - only lignes_data exists
-      delete supabaseData.lignes
 
       const { data, error } = await supabase
         .from('devis')
@@ -230,6 +247,7 @@ export function DevisPage() {
       setShowStandardGenerator(false)
     } catch (error) {
       console.error('Error creating devis:', error)
+      alert('Erreur lors de la création du devis: ' + (error as any).message)
     }
   }
 
@@ -245,19 +263,33 @@ export function DevisPage() {
         return
       }
 
-      // Transform data for Supabase - map client object to client_id and handle lignes properly
+      // Transform data for Supabase - only keep valid database columns
       const supabaseData = {
-        ...devisData
+        numero: devisData.numero,
+        client_id: devisData.client?.id || devisData.client_id,
+        statut: devisData.statut,
+        date_devis: devisData.date_devis,
+        objet: devisData.objet,
+        description_operation: devisData.description_operation,
+        total_ht: devisData.total_ht,
+        total_tva: devisData.total_tva,
+        total_ttc: devisData.total_ttc,
+        tva_taux: devisData.tva_taux,
+        marge_totale: devisData.marge_totale,
+        cee_kwh_cumac: devisData.cee_kwh_cumac,
+        cee_prix_unitaire: devisData.cee_prix_unitaire,
+        cee_montant_total: devisData.cee_montant_total,
+        reste_a_payer_ht: devisData.reste_a_payer_ht,
+        remarques: devisData.remarques,
+        type: devisData.type,
+        modalites_paiement: devisData.modalites_paiement,
+        garantie: devisData.garantie,
+        penalites: devisData.penalites,
+        clause_juridique: devisData.clause_juridique,
+        delais: devisData.delais,
+        lignes_data: devisData.lignes_data,
+        updated_at: new Date().toISOString()
       }
-      
-      // Map client object to client_id if present
-      if (supabaseData.client) {
-        supabaseData.client_id = supabaseData.client.id
-        delete supabaseData.client
-      }
-      
-      // Remove lignes field as it doesn't exist in database - only lignes_data exists
-      delete supabaseData.lignes
 
       const { data, error } = await supabase
         .from('devis')
@@ -273,6 +305,7 @@ export function DevisPage() {
       setShowStandardGenerator(false)
     } catch (error) {
       console.error('Error updating devis:', error)
+      alert('Erreur lors de la mise à jour du devis: ' + (error as any).message)
     }
   }
 
