@@ -180,6 +180,74 @@ export interface DevisZone {
   collapsed?: boolean;
 }
 
+// Interface pour les fournisseurs
+export interface Fournisseur {
+  id: string;
+  nom: string;
+  entreprise: string;
+  email?: string;
+  telephone?: string;
+  adresse?: string;
+  ville?: string;
+  code_postal?: string;
+  pays: string;
+  actif: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Interface pour les prospects
+export interface Prospect {
+  id: string;
+  nom: string;
+  entreprise: string;
+  email?: string;
+  telephone?: string;
+  statut: 'nouveau' | 'contacte' | 'qualifie' | 'converti' | 'perdu';
+  source?: string;
+  notes?: string;
+  commercial_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Interface pour les commandes
+export interface Commande {
+  id: string;
+  numero: string;
+  devis_id: string;
+  client_id: string;
+  statut: 'en_cours' | 'expediee' | 'livree' | 'annulee';
+  date_commande: string;
+  date_livraison_prevue?: string;
+  date_livraison?: string;
+  total_ht: number;
+  total_tva: number;
+  total_ttc: number;
+  notes?: string;
+  commercial_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Interface pour les factures
+export interface Facture {
+  id: string;
+  numero: string;
+  commande_id?: string;
+  client_id: string;
+  statut: 'brouillon' | 'envoyee' | 'payee' | 'en_retard' | 'annulee';
+  date_facture: string;
+  date_echeance?: string;
+  date_paiement?: string;
+  total_ht: number;
+  total_tva: number;
+  total_ttc: number;
+  notes?: string;
+  commercial_id?: string;
+  created_at: string;
+  updated_at: string;
+}
 // ==================== CONFIGURATION ====================
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;

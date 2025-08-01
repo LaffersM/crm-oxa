@@ -110,6 +110,7 @@ interface OXADevisGeneratorProps {
   clients: Client[];
   articles: Article[];
   onClientCreated: (client: Client) => void;
+  onArticleCreated?: (articleData: Partial<Article>) => Promise<void>;
   onSave: (devisData: any) => void;
   onCancel: () => void;
   existingDevis?: OXADevis | null;
@@ -136,6 +137,7 @@ export default function OXADevisGenerator({
   clients, 
   articles, 
   onClientCreated, 
+  onArticleCreated,
   onSave, 
   onCancel, 
   existingDevis 
@@ -400,23 +402,91 @@ export default function OXADevisGenerator({
   };
 
   const createNewArticle = (designation: string, prix: number) => {
-    // Simulate article creation - in real app, this would call the API
-    const newArticle: Article = {
-      id: Date.now().toString(),
-      nom: designation,
-      description: `Article créé depuis le devis`,
-      type: 'MATERIEL',
-      prix_achat: prix * 0.7, // Estimate 30% margin
-      prix_vente: prix,
-      tva: 20,
-      unite: 'unité',
-      actif: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    alert(`Article "${designation}" créé dans le catalogue`);
-    return newArticle;
+    return new Promise<void>((resolve, reject) => {
+      // Créer un modal pour saisir les détails de l'article
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50';
+      modal.innerHTML = `
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Créer un nouvel article</h3>
+          <form id="new-article-form" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Nom de l'article</label>
+              <input type="text" id="article-nom" value="${designation}" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea id="article-description" class="w-full px-3 py-2 border border-gray-300 rounded-lg" rows="2" placeholder="Description de l'article"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <select id="article-type" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                <option value="IPE">IPE</option>
+                <option value="ELEC">ELEC</option>
+                <option value="MATERIEL" selected>MATERIEL</option>
+                <option value="MAIN_OEUVRE">Main d'œuvre</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Prix d'achat</label>
+                <input type="number" id="article-prix-achat" value="${(prix * 0.7).toFixed(2)}" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Prix de vente</label>
+                <input type="number" id="article-prix-vente" value="${prix}" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
+              </div>
+            </div>
+            <div class="flex justify-end space-x-3 pt-4">
+              <button type="button" id="cancel-btn" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Annuler</button>
+              <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Créer</button>
+            </div>
+          </form>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+      
+      const form = modal.querySelector('#new-article-form') as HTMLFormElement;
+      const cancelBtn = modal.querySelector('#cancel-btn') as HTMLButtonElement;
+      
+      const cleanup = () => {
+        document.body.removeChild(modal);
+      };
+      
+      cancelBtn.onclick = () => {
+        cleanup();
+        reject(new Error('Création annulée'));
+      };
+      
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(form);
+        const articleData = {
+          nom: (modal.querySelector('#article-nom') as HTMLInputElement).value,
+          description: (modal.querySelector('#article-description') as HTMLTextAreaElement).value,
+          type: (modal.querySelector('#article-type') as HTMLSelectElement).value,
+          prix_achat: parseFloat((modal.querySelector('#article-prix-achat') as HTMLInputElement).value) || 0,
+          prix_vente: parseFloat((modal.querySelector('#article-prix-vente') as HTMLInputElement).value) || 0,
+          tva: 20,
+          unite: 'unité',
+          actif: true
+        };
+        
+        try {
+          // Appeler la fonction de création d'article du parent
+          await onArticleCreated(articleData);
+          cleanup();
+          resolve();
+        } catch (error) {
+          console.error('Erreur lors de la création de l\'article:', error);
+          alert('Erreur lors de la création de l\'article');
+          cleanup();
+          reject(error);
+        }
+      };
+    });
   };
 
   const handleSave = () => {
@@ -950,7 +1020,17 @@ export default function OXADevisGenerator({
                                       </button>
                                       {ligne.designation && !ligne.article_id && (
                                         <button
-                                          onClick={() => createNewArticle(ligne.designation, ligne.prix_unitaire)}
+                                          onClick={async () => {
+                                            if (onArticleCreated) {
+                                              try {
+                                                await createNewArticle(ligne.designation, ligne.prix_unitaire);
+                                              } catch (error) {
+                                                console.error('Erreur création article:', error);
+                                              }
+                                            } else {
+                                              alert('Fonctionnalité de création d\'article non disponible');
+                                            }
+                                          }}
                                           className="text-green-600 hover:text-green-800 p-1"
                                           title="Ajouter au catalogue"
                                         >

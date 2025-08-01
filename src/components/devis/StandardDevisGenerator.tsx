@@ -39,6 +39,7 @@ interface StandardDevisGeneratorProps {
   clients: Client[]
   articles: Article[]
   onClientCreated?: (client: Client) => void
+  onArticleCreated?: (articleData: Partial<Article>) => Promise<void>
   onSave: (devisData: StandardDevisData) => void
   onCancel: () => void
   existingDevis?: StandardDevisData | null
@@ -48,6 +49,7 @@ export function StandardDevisGenerator({
   clients, 
   articles, 
   onClientCreated,
+  onArticleCreated,
   onSave, 
   onCancel, 
   existingDevis 
@@ -297,32 +299,29 @@ export function StandardDevisGenerator({
   }
 
   const addToCatalogue = (designation: string, prix: number, groupe: string) => {
-    // Créer un nouvel article dans le catalogue
-    const newArticle: Article = {
-      id: Date.now().toString(),
-      nom: designation,
-      description: `Article créé depuis le devis ${devisData.numero}`,
-      type: groupe as 'IPE' | 'ELEC' | 'MATERIEL' | 'MAIN_OEUVRE',
-      prix_achat: 0,
-      prix_vente: prix,
-      tva: 20,
-      unite: 'unité',
-      fournisseur_id: undefined,
-      actif: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    if (onArticleCreated) {
+      const articleData = {
+        nom: designation,
+        description: `Article créé depuis le devis ${devisData.numero}`,
+        type: groupe as 'IPE' | 'ELEC' | 'MATERIEL' | 'MAIN_OEUVRE',
+        prix_achat: prix * 0.7, // Estimation 30% de marge
+        prix_vente: prix,
+        tva: 20,
+        unite: 'unité',
+        actif: true
+      }
+      
+      onArticleCreated(articleData)
+        .then(() => {
+          alert(`Article "${designation}" ajouté au catalogue dans le groupe ${groupe}`)
+        })
+        .catch((error) => {
+          console.error('Erreur lors de l\'ajout au catalogue:', error)
+          alert('Erreur lors de l\'ajout au catalogue')
+        })
+    } else {
+      alert('Fonctionnalité d\'ajout au catalogue non disponible')
     }
-    
-    // En mode démo, on simule l'ajout
-    if (!isSupabaseConfigured()) {
-      console.log('Article ajouté au catalogue (mode démo):', newArticle)
-      alert(`Article "${designation}" ajouté au catalogue dans le groupe ${groupe}`)
-      return
-    }
-    
-    // En mode réel, on pourrait ajouter à la base de données
-    // Pour l'instant, on simule juste
-    alert(`Article "${designation}" ajouté au catalogue dans le groupe ${groupe}`)
   }
 
   const filteredArticles = articles.filter(article => {
@@ -645,7 +644,13 @@ export function StandardDevisGenerator({
                               </button>
                               {ligne.designation && !ligne.article_id && (
                                 <button
-                                  onClick={() => addToCatalogue(ligne.designation, ligne.prix_unitaire, 'MATERIEL')}
+                                  onClick={() => {
+                                    if (onArticleCreated) {
+                                      addToCatalogue(ligne.designation, ligne.prix_unitaire, 'MATERIEL')
+                                    } else {
+                                      alert('Fonctionnalité d\'ajout au catalogue non disponible')
+                                    }
+                                  }}
                                   className="text-green-600 hover:text-green-800 p-1"
                                   title="Ajouter au catalogue"
                                 >

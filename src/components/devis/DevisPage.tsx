@@ -301,6 +301,32 @@ export function DevisPage() {
     setClients([newClient, ...clients])
   }
 
+  const handleArticleCreated = async (articleData: Partial<Article>) => {
+    try {
+      if (!isSupabaseConfigured()) {
+        const newArticle: Article = {
+          id: Date.now().toString(),
+          ...articleData,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as Article
+        setArticles([newArticle, ...articles])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('articles')
+        .insert([articleData])
+        .select()
+        .single()
+
+      if (error) throw error
+      setArticles([data, ...articles])
+    } catch (error) {
+      console.error('Error creating article from devis:', error)
+      throw error
+    }
+  }
   const getClientName = (clientId: string) => {
     const client = clients.find(c => c.id === clientId)
     return client ? `${client.nom} - ${client.entreprise}` : 'Client inconnu'
@@ -369,6 +395,7 @@ export function DevisPage() {
         clients={clients}
         articles={articles}
         onClientCreated={handleClientCreated}
+        onArticleCreated={handleArticleCreated}
         onSave={editingDevis 
           ? (data) => handleUpdateDevis(editingDevis.id, data)
           : handleCreateDevis
@@ -388,6 +415,7 @@ export function DevisPage() {
         clients={clients}
         articles={articles}
         onClientCreated={handleClientCreated}
+        onArticleCreated={handleArticleCreated}
         onSave={editingDevis 
           ? (data) => handleUpdateDevis(editingDevis.id, data)
           : handleCreateDevis
