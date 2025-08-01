@@ -192,6 +192,9 @@ export function DevisPage() {
 
   const handleCreateDevis = async (devisData: any) => {
     try {
+      console.log('=== DÉBUT CRÉATION DEVIS ===')
+      console.log('Données reçues:', devisData)
+      
       if (!isSupabaseConfigured()) {
         const newDevis: OXADevis = {
           id: Date.now().toString(),
@@ -206,14 +209,22 @@ export function DevisPage() {
         return
       }
 
+      // Validation des données obligatoires
+      if (!devisData.client?.id && !devisData.client_id) {
+        throw new Error('Client requis pour créer un devis')
+      }
+      
+      if (!devisData.objet || devisData.objet.trim() === '') {
+        throw new Error('L\'objet du devis est requis')
+      }
+      
       // Transform data for Supabase - only keep valid database columns
       const supabaseData = {
-        numero: devisData.numero,
+        numero: devisData.numero || `DEV-${Date.now()}`,
         client_id: devisData.client?.id || devisData.client_id,
         statut: devisData.statut || 'brouillon',
-        date_creation: new Date().toISOString(),
-        date_devis: devisData.date_devis,
-        objet: devisData.objet,
+        date_devis: devisData.date_devis || new Date().toISOString().split('T')[0],
+        objet: devisData.objet.trim(),
         description_operation: devisData.description_operation,
         total_ht: devisData.total_ht || 0,
         total_tva: devisData.total_tva || 0,
@@ -221,7 +232,7 @@ export function DevisPage() {
         tva_taux: devisData.tva_taux || 20,
         marge_totale: devisData.marge_totale || 0,
         cee_kwh_cumac: devisData.cee_kwh_cumac || 0,
-        cee_prix_unitaire: devisData.cee_prix_unitaire || 0.002,
+        cee_prix_unitaire: devisData.cee_prix_unitaire || 0.002000,
         cee_montant_total: devisData.cee_montant_total || 0,
         reste_a_payer_ht: devisData.reste_a_payer_ht || devisData.total_ht || 0,
         remarques: devisData.remarques,
@@ -235,24 +246,48 @@ export function DevisPage() {
         commercial_id: profile?.id
       }
 
+      // Nettoyer les valeurs undefined et null
+      Object.keys(supabaseData).forEach(key => {
+        if (supabaseData[key] === undefined) {
+          delete supabaseData[key]
+        }
+      })
+      
+      console.log('Données nettoyées pour Supabase:', supabaseData)
+      console.log('Profile ID:', profile?.id)
+      
       const { data, error } = await supabase
         .from('devis')
         .insert([supabaseData])
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Erreur Supabase détaillée:', error)
+        console.error('Code erreur:', error.code)
+        console.error('Message:', error.message)
+        console.error('Détails:', error.details)
+        console.error('Hint:', error.hint)
+        throw error
+      }
+      
+      console.log('Devis créé avec succès:', data)
       setDevis([data, ...devis])
       setShowOXAGenerator(false)
       setShowStandardGenerator(false)
     } catch (error) {
       console.error('Error creating devis:', error)
-      alert('Erreur lors de la création du devis: ' + (error as any).message)
+      const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue'
+      alert('Erreur lors de la création du devis: ' + errorMessage)
     }
   }
 
   const handleUpdateDevis = async (id: string, devisData: any) => {
     try {
+      console.log('=== DÉBUT MISE À JOUR DEVIS ===')
+      console.log('ID:', id)
+      console.log('Données reçues:', devisData)
+      
       if (!isSupabaseConfigured()) {
         setDevis(devis.map(d => 
           d.id === id ? { ...d, ...devisData, updated_at: new Date().toISOString() } : d
@@ -263,13 +298,22 @@ export function DevisPage() {
         return
       }
 
+      // Validation des données obligatoires
+      if (!devisData.client?.id && !devisData.client_id) {
+        throw new Error('Client requis pour mettre à jour le devis')
+      }
+      
+      if (!devisData.objet || devisData.objet.trim() === '') {
+        throw new Error('L\'objet du devis est requis')
+      }
+      
       // Transform data for Supabase - only keep valid database columns
       const supabaseData = {
-        numero: devisData.numero,
+        numero: devisData.numero || `DEV-${Date.now()}`,
         client_id: devisData.client?.id || devisData.client_id,
         statut: devisData.statut,
-        date_devis: devisData.date_devis,
-        objet: devisData.objet,
+        date_devis: devisData.date_devis || new Date().toISOString().split('T')[0],
+        objet: devisData.objet.trim(),
         description_operation: devisData.description_operation,
         total_ht: devisData.total_ht,
         total_tva: devisData.total_tva,
@@ -291,6 +335,15 @@ export function DevisPage() {
         updated_at: new Date().toISOString()
       }
 
+      // Nettoyer les valeurs undefined et null
+      Object.keys(supabaseData).forEach(key => {
+        if (supabaseData[key] === undefined) {
+          delete supabaseData[key]
+        }
+      })
+      
+      console.log('Données nettoyées pour Supabase:', supabaseData)
+      
       const { data, error } = await supabase
         .from('devis')
         .update(supabaseData)
@@ -298,14 +351,24 @@ export function DevisPage() {
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Erreur Supabase détaillée:', error)
+        console.error('Code erreur:', error.code)
+        console.error('Message:', error.message)
+        console.error('Détails:', error.details)
+        console.error('Hint:', error.hint)
+        throw error
+      }
+      
+      console.log('Devis mis à jour avec succès:', data)
       setDevis(devis.map(d => d.id === id ? data : d))
       setEditingDevis(null)
       setShowOXAGenerator(false)
       setShowStandardGenerator(false)
     } catch (error) {
       console.error('Error updating devis:', error)
-      alert('Erreur lors de la mise à jour du devis: ' + (error as any).message)
+      const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue'
+      alert('Erreur lors de la mise à jour du devis: ' + errorMessage)
     }
   }
 
