@@ -64,7 +64,7 @@ export interface LigneDevis {
   article?: Article;
 }
 
-// Ligne de devis (format frontend)
+// Ligne de devis (format frontend pour les générateurs)
 export interface DevisLine {
   id: string;
   designation: string;
@@ -83,25 +83,25 @@ export interface DevisLine {
   ordre: number;
 }
 
-// Devis unifié (structure principale)
-export interface Devis {
+// Interface de base pour tous les devis
+export interface BaseDevis {
   id: string;
   numero: string;
-  date_devis?: string;
+  date_devis: string;
   date_creation: string;
   date_validite?: string;
-  objet?: string;
+  objet: string;
   client_id: string;
   description_operation?: string;
   notes?: string;
+  remarques?: string;
   statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire';
-  type?: 'standard' | 'cee';
+  type?: 'standard' | 'cee' | 'IPE' | 'ELEC' | 'MATERIEL' | 'MAIN_OEUVRE';
   total_ht: number;
   total_tva: number;
   total_ttc: number;
-  marge_totale: number;
-  prime_cee: number;
   tva_taux?: number;
+  marge_totale: number;
   modalites_paiement?: string;
   garantie?: string;
   penalites?: string;
@@ -111,18 +111,32 @@ export interface Devis {
   created_at: string;
   updated_at: string;
   // Relations
-  lignes?: LigneDevis[];
   client?: Client;
 }
 
-// Format OXA étendu (hérite de Devis)
-export interface OXADevis extends Devis {
-  lignes_data: any[]; // Format JSON stocké en base
+// Devis standard (hérite de BaseDevis)
+export interface Devis extends BaseDevis {
+  lignes?: LigneDevis[];
+  prime_cee: number; // Compatible avec l'ancien code
+}
+
+// Devis OXA/CEE (hérite de BaseDevis avec extensions CEE)
+export interface OXADevis extends BaseDevis {
+  // Format base de données
+  lignes_data: any[];
+  
+  // Format frontend (pour les générateurs)
+  lignes?: DevisLine[];
+  
+  // Zone pour compatibilité
   zone?: string;
+  
+  // Données CEE étendues
   cee_kwh_cumac: number;
   cee_prix_unitaire: number;
   cee_montant_total: number;
   reste_a_payer_ht: number;
+  prime_cee: number; // Alias pour cee_montant_total
 }
 
 // Profil utilisateur
@@ -136,6 +150,34 @@ export interface Profile {
   actif: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Types pour les calculs CEE
+export interface CEECalculation {
+  profil_fonctionnement: '1x8h' | '2x8h' | '3x8h_weekend_off' | '3x8h_24_7' | 'continu_24_7';
+  puissance_nominale: number;
+  duree_contrat: number;
+  coefficient_activite: number;
+  facteur_f: number;
+  kwh_cumac: number;
+  tarif_kwh: number;
+  prime_estimee: number;
+  operateur_nom: string;
+}
+
+export interface CEEIntegration {
+  mode: 'deduction' | 'information';
+  afficher_bloc: boolean;
+}
+
+// Types pour les zones modulaires (générateur CEE)
+export interface DevisZone {
+  id: string;
+  nom: string;
+  lignes: DevisLine[];
+  visible_pdf: boolean;
+  ordre: number;
+  collapsed?: boolean;
 }
 
 // ==================== CONFIGURATION ====================
@@ -187,6 +229,33 @@ export const getUserProfile = async (userId: string): Promise<Profile | null> =>
   }
 };
 
+// Convertisseur : OXADevis → Devis standard (pour compatibilité)
+export const oxaDevisToDevis = (oxaDevis: OXADevis): Devis => {
+  return {
+    ...oxaDevis,
+    lignes: oxaDevis.lignes?.map(line => ({
+      id: line.id,
+      devis_id: oxaDevis.id,
+      article_id: line.article_id,
+      description: line.designation,
+      zone: line.zone,
+      quantite: line.quantite,
+      prix_unitaire: line.prix_unitaire,
+      prix_achat: line.prix_achat || 0,
+      tva: line.tva || 20,
+      total_ht: line.prix_total,
+      total_tva: line.prix_total * ((line.tva || 20) / 100),
+      total_ttc: line.prix_total * (1 + (line.tva || 20) / 100),
+      marge: line.marge_brute || 0,
+      ordre: line.ordre,
+      remarques: line.remarques,
+      created_at: oxaDevis.created_at,
+      updated_at: oxaDevis.updated_at
+    })) || [],
+    prime_cee: oxaDevis.cee_montant_total
+  };
+};
+
 // Convertisseur : Devis DB → Format Frontend
 export const convertDevisToFrontend = (dbDevis: any): Devis => {
   return {
@@ -215,6 +284,16 @@ export const convertDevisToDatabase = (frontendDevis: any): any => {
   }
   
   return dbData;
+};
+
+// Générateur de numéro de devis
+export const generateDevisNumber = (client: Client, type: 'standard' | 'cee' = 'standard'): string => {
+  const year = new Date().getFullYear();
+  const clientCode = client.entreprise.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X');
+  const typePrefix = type === 'cee' ? 'CEE' : 'STD';
+  const timestamp = Date.now().toString().slice(-4);
+  
+  return `${typePrefix}-${year}-${clientCode}-${timestamp}`;
 };
 
 // Fonctions de compatibilité (pour éviter les erreurs d'import)
