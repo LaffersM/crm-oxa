@@ -51,16 +51,17 @@ const initAuth = async (): Promise<{ user: User | null; session: Session | null;
     }
 
     // Test connection with a simple query first
+    // CORRECTION: Requête simplifiée qui ne génère pas d'erreur 500
     const { error: connectionError } = await supabase
       .from('profiles')
-      .select('count')
-      .limit(1)
-      .single();
+      .select('id')
+      .limit(1);
     
     if (connectionError) {
       // Handle different types of connection errors
-      if (connectionError.code === 'PGRST301') {
+      if (connectionError.code === 'PGRST116') {
         // This is expected when no data exists, connection is working
+        console.log('Table profiles is empty but connection works');
       } else if (connectionError.message?.includes('timeout')) {
         console.warn('Supabase timeout, switching to demo mode');
         return getDemoAuth();
@@ -118,6 +119,7 @@ const getDemoAuth = () => {
   
   return { user: demoUser, session: demoSession, error: null };
 };
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
