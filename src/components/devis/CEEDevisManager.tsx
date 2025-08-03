@@ -1,46 +1,69 @@
 import React, { useState, useEffect } from 'react'
+import { supabase, isSupabaseConfigured, Client, Article } from '../../lib/supabase'
+import { useAuth } from '../../hooks/useAuth'
 import { 
   FileText, 
-  Plus, 
   Search, 
-  Filter, 
-  Eye, 
+  Plus, 
   Edit, 
   Trash2, 
-  Calculator,
-  Send,
-  Check,
-  X,
-  Clock,
-  AlertCircle,
-  Download,
-  Copy,
-  Zap,
-  Euro,
+  Eye,
   Calendar,
-  User,
-  Building,
+  Euro,
   Save,
-  RefreshCw,
-  List // <-- import ajouté !
+  X,
+  User,
+  Package,
+  Calculator,
+  Zap
 } from 'lucide-react'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
-import { useAuth } from '../../hooks/useAuth'
+import { ClientSelector } from './ClientSelector'
+import { ArticleSelector } from './ArticleSelector'
+import { generateDevisPDF } from '../../utils/pdfExport'
 
-// ==================== TYPES ====================
+interface CEEDevis {
+  id?: string
+  numero?: string
+  client_id: string
+  client?: Client
+  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire'
+  date_devis: string
+  date_validite: string
+  objet: string
+  description_operation: string
+  total_ht: number
+  total_tva: number
+  total_ttc: number
+  tva_taux: number
+  cee_kwh_cumac: number
+  cee_prix_unitaire: number
+  cee_montant_total: number
+  reste_a_payer_ht: number
+  remarques?: string
+  type: string
+  modalites_paiement: string
+  garantie: string
+  penalites: string
+  clause_juridique: string
+  delais: string
+  lignes_data: DevisLine[]
+  commercial_id?: string
+  created_at?: string
+  updated_at?: string
+}
 
-interface Client {
+interface DevisLine {
   id: string
-  nom: string
-  entreprise: string
-  siret?: string
-  email?: string
-  telephone?: string
-  adresse?: string
-  ville?: string
-  code_postal?: string
-  contact_principal?: string
-  created_at: string
+  designation: string
+  description?: string
+  zone: string
+  quantite: number
+  prix_unitaire: number
+  prix_total: number
+  tva: number
+  type: 'materiel' | 'service' | 'parametrage' | 'etude'
+  ordre: number
+  article_id?: string
 }
 
 interface CEECalculation {
@@ -56,723 +79,67 @@ interface CEECalculation {
   notes?: string
 }
 
-interface DevisLine {
-  id: string
-  designation: string
-  description?: string
-  zone: string
-  quantite: number
-  prix_unitaire: number
-  prix_total: number
-  tva: number
-  type: 'materiel' | 'service' | 'parametrage' | 'etude'
-  ordre: number
-}
-
-interface CEEDevis {
-  id: string
-  numero: string
-  date_devis: string
-  date_validite: string
-  client_id: string
-  client?: Client
-  objet: string
-  description_operation: string
-  statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire'
-  cee_data: CEECalculation
-  lignes: DevisLine[]
-  total_ht: number
-  total_tva: number
-  total_ttc: number
-  prime_cee: number
-  reste_a_payer: number
-  commercial_id: string
-  created_at: string
-  updated_at: string
-  notes?: string
-}
-
-// ==================== COMPOSANT PRINCIPAL ====================
-
 export function CEEDevisManager() {
   const { profile } = useAuth()
-  
-  // États principaux
   const [devis, setDevis] = useState<CEEDevis[]>([])
   const [clients, setClients] = useState<Client[]>([])
+  const [articles, setArticles] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  
-  // États UI
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [showGenerator, setShowGenerator] = useState(false)
-  const [showDetails, setShowDetails] = useState(false)
-  const [selectedDevis, setSelectedDevis] = useState<CEEDevis | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [showForm, setShowForm] = useState(false)
   const [editingDevis, setEditingDevis] = useState<CEEDevis | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  // ==================== CHARGEMENT DES DONNÉES ====================
-
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
-    setLoading(true)
-    setError(null)
-    
-    try {
-      if (isSupabaseConfigured()) {
-        // Charger depuis Supabase
-        const [devisResult, clientsResult] = await Promise.all([
-          supabase.from('devis').select(`
-            *,
-            client:clients(*)
-          `).eq('type', 'cee'),
-          supabase.from('clients').select('*')
-        ])
-
-        if (devisResult.error) throw devisResult.error
-        if (clientsResult.error) throw clientsResult.error
-
-        setDevis(devisResult.data || [])
-        setClients(clientsResult.data || [])
-      } else {
-        // Mode démo avec données factices
-        setClients([
-          {
-            id: '1',
-            nom: 'Martin Durand',
-            entreprise: 'Industrie ABC',
-            email: 'martin@abc.com',
-            telephone: '01 23 45 67 89',
-            ville: 'Lyon',
-            created_at: new Date().toISOString()
-          }
-        ])
-        
-        setDevis([
-          {
-            id: '1',
-            numero: 'CEE-2025-ABC-001',
-            date_devis: '2025-08-03',
-            date_validite: '2025-09-03',
-            client_id: '1',
-            objet: 'Installation système efficacité énergétique',
-            description_operation: 'Installation d\'un système de récupération de chaleur',
-            statut: 'brouillon',
-            cee_data: {
-              profil_fonctionnement: '2x8h',
-              puissance_nominale: 50,
-              duree_contrat: 3,
-              coefficient_activite: 2,
-              facteur_f: 3,
-              kwh_cumac: 8820,
-              tarif_kwh: 0.002,
-              prime_estimee: 17.64,
-              operateur_nom: 'TotalEnergies'
-            },
-            lignes: [
-              {
-                id: '1',
-                designation: 'Étude technique préalable',
-                zone: 'Étude',
-                quantite: 1,
-                prix_unitaire: 1500,
-                prix_total: 1500,
-                tva: 20,
-                type: 'etude',
-                ordre: 1
-              },
-              {
-                id: '2',
-                designation: 'Échangeur de chaleur haute performance',
-                zone: 'Matériel',
-                quantite: 1,
-                prix_unitaire: 8500,
-                prix_total: 8500,
-                tva: 20,
-                type: 'materiel',
-                ordre: 2
-              }
-            ],
-            total_ht: 10000,
-            total_tva: 2000,
-            total_ttc: 12000,
-            prime_cee: 17.64,
-            reste_a_payer: 11982.36,
-            commercial_id: profile?.id || '1',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
-        ])
-      }
-    } catch (err: any) {
-      setError(err.message)
-      console.error('Erreur chargement données:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // ==================== FILTRAGE ====================
-
-  const filteredDevis = devis.filter(d => {
-    const matchesSearch = d.numero.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         d.objet.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         d.client?.entreprise?.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesStatus = statusFilter === 'all' || d.statut === statusFilter
-    
-    return matchesSearch && matchesStatus
+  // Form state
+  const [formData, setFormData] = useState<CEEDevis>({
+    client_id: '',
+    statut: 'brouillon',
+    date_devis: new Date().toISOString().split('T')[0],
+    date_validite: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    objet: 'Devis CEE - Décarbonation industrielle',
+    description_operation: '',
+    total_ht: 0,
+    total_tva: 0,
+    total_ttc: 0,
+    tva_taux: 20,
+    cee_kwh_cumac: 0,
+    cee_prix_unitaire: 0.002,
+    cee_montant_total: 0,
+    reste_a_payer_ht: 0,
+    remarques: '',
+    type: 'CEE',
+    modalites_paiement: '30% à la commande, 70% à la livraison',
+    garantie: '2 ans pièces et main d\'œuvre',
+    penalites: 'Pénalités de retard : 0,1% par jour de retard',
+    clause_juridique: 'Tout litige relève de la compétence du Tribunal de Commerce de Paris',
+    delais: '4 à 6 semaines après validation du devis',
+    lignes_data: []
   })
 
-  // ==================== ACTIONS ====================
-
-  const handleCreateDevis = () => {
-    setEditingDevis(null)
-    setShowGenerator(true)
-  }
-
-  const handleEditDevis = (devis: CEEDevis) => {
-    setEditingDevis(devis)
-    setShowGenerator(true)
-  }
-
-  const handleViewDevis = (devis: CEEDevis) => {
-    setSelectedDevis(devis)
-    setShowDetails(true)
-  }
-
-  const handleDeleteDevis = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce devis ?')) return
-    
-    try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('devis').delete().eq('id', id)
-        if (error) throw error
-      }
-      
-      setDevis(devis.filter(d => d.id !== id))
-    } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  const handleSaveDevis = async (devisData: CEEDevis) => {
-    try {
-      if (isSupabaseConfigured()) {
-        if (editingDevis) {
-          // Mise à jour
-          const { error } = await supabase
-            .from('devis')
-            .update({
-              ...devisData,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', editingDevis.id)
-          
-          if (error) throw error
-          
-          setDevis(devis.map(d => d.id === editingDevis.id ? devisData : d))
-        } else {
-          // Création
-          const { data, error } = await supabase
-            .from('devis')
-            .insert([{
-              ...devisData,
-              type: 'cee',
-              commercial_id: profile?.id,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }])
-            .select()
-            .single()
-          
-          if (error) throw error
-          
-          setDevis([data, ...devis])
-        }
-      } else {
-        // Mode démo
-        if (editingDevis) {
-          setDevis(devis.map(d => d.id === editingDevis.id ? devisData : d))
-        } else {
-          const newDevis = {
-            ...devisData,
-            id: Date.now().toString(),
-            created_at: new Date().toISOString()
-          }
-          setDevis([newDevis, ...devis])
-        }
-      }
-      
-      setShowGenerator(false)
-      setEditingDevis(null)
-    } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  // ==================== HELPERS ====================
-
-  const getStatusColor = (statut: string) => {
-    switch (statut) {
-      case 'brouillon': return 'bg-gray-100 text-gray-800'
-      case 'envoye': return 'bg-blue-100 text-blue-800'
-      case 'accepte': return 'bg-green-100 text-green-800'
-      case 'refuse': return 'bg-red-100 text-red-800'
-      case 'expire': return 'bg-orange-100 text-orange-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const getStatusIcon = (statut: string) => {
-    switch (statut) {
-      case 'brouillon': return Clock
-      case 'envoye': return Send
-      case 'accepte': return Check
-      case 'refuse': return X
-      case 'expire': return AlertCircle
-      default: return Clock
-    }
-  }
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR'
-    }).format(amount)
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('fr-FR')
-  }
-
-  // ==================== RENDU ====================
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <Zap className="h-8 w-8 mr-3 text-yellow-600" />
-            Devis CEE
-          </h1>
-          <p className="text-gray-600 mt-1">
-            Gestion des devis avec calculateur CEE intégré (IND-UT-134)
-          </p>
-        </div>
-        
-        <button
-          onClick={handleCreateDevis}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-        >
-          <Plus className="h-5 w-5 mr-2" />
-          Nouveau devis CEE
-        </button>
-      </div>
-
-      {/* Erreur */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-red-600 mr-2" />
-            <span className="text-red-800">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="ml-auto text-red-600 hover:text-red-800"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Filtres et recherche */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex flex-col sm:flex-row gap-4">
-          {/* Recherche */}
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-            <input
-              type="text"
-              placeholder="Rechercher par numéro, objet ou client..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          
-          {/* Filtre statut */}
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
-            >
-              <option value="all">Tous les statuts</option>
-              <option value="brouillon">Brouillon</option>
-              <option value="envoye">Envoyé</option>
-              <option value="accepte">Accepté</option>
-              <option value="refuse">Refusé</option>
-              <option value="expire">Expiré</option>
-            </select>
-          </div>
-          
-          {/* Bouton actualiser */}
-          <button
-            onClick={loadData}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center"
-          >
-            <RefreshCw className="h-5 w-5 mr-2" />
-            Actualiser
-          </button>
-        </div>
-      </div>
-
-      {/* Liste des devis */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        {filteredDevis.length === 0 ? (
-          <div className="text-center py-12">
-            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              {searchTerm || statusFilter !== 'all' ? 'Aucun devis trouvé' : 'Aucun devis CEE'}
-            </h3>
-            <p className="text-gray-600 mb-6">
-              {searchTerm || statusFilter !== 'all' 
-                ? 'Essayez de modifier vos critères de recherche'
-                : 'Créez votre premier devis CEE avec le calculateur intégré'
-              }
-            </p>
-            {(!searchTerm && statusFilter === 'all') && (
-              <button
-                onClick={handleCreateDevis}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center mx-auto"
-              >
-                <Plus className="h-5 w-5 mr-2" />
-                Créer un devis CEE
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Devis
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Client
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Montants
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    CEE
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Statut
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredDevis.map((devis) => {
-                  const StatusIcon = getStatusIcon(devis.statut)
-                  const client = clients.find(c => c.id === devis.client_id) || devis.client
-                  
-                  return (
-                    <tr key={devis.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {devis.numero}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {formatDate(devis.date_devis)}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {client?.entreprise}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {client?.nom}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {formatCurrency(devis.total_ttc)}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            HT: {formatCurrency(devis.total_ht)}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-green-600">
-                            {formatCurrency(devis.prime_cee)}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {devis.cee_data.kwh_cumac.toLocaleString()} kWh
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(devis.statut)}`}>
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {devis.statut}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => handleViewDevis(devis)}
-                            className="text-blue-600 hover:text-blue-900 p-1 rounded"
-                            title="Voir"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleEditDevis(devis)}
-                            className="text-yellow-600 hover:text-yellow-900 p-1 rounded"
-                            title="Modifier"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDevis(devis.id)}
-                            className="text-red-600 hover:text-red-900 p-1 rounded"
-                            title="Supprimer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Modales */}
-      {showGenerator && (
-        <CEEDevisGenerator
-          editingDevis={editingDevis}
-          clients={clients}
-          onSave={handleSaveDevis}
-          onCancel={() => {
-            setShowGenerator(false)
-            setEditingDevis(null)
-          }}
-        />
-      )}
-
-      {showDetails && selectedDevis && (
-        <CEEDevisDetails
-          devis={selectedDevis}
-          client={clients.find(c => c.id === selectedDevis.client_id)}
-          onClose={() => {
-            setShowDetails(false)
-            setSelectedDevis(null)
-          }}
-          onEdit={() => {
-            setShowDetails(false)
-            handleEditDevis(selectedDevis)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-// ==================== GÉNÉRATEUR DE DEVIS CEE ====================
-
-interface CEEDevisGeneratorProps {
-  editingDevis: CEEDevis | null
-  clients: Client[]
-  onSave: (devis: CEEDevis) => void
-  onCancel: () => void
-}
-
-function CEEDevisGenerator({ editingDevis, clients, onSave, onCancel }: CEEDevisGeneratorProps) {
-  const [formData, setFormData] = useState<CEEDevis>(() => {
-    if (editingDevis) return editingDevis
-    
-    return {
-      id: '',
-      numero: '',
-      date_devis: new Date().toISOString().split('T')[0],
-      date_validite: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      client_id: '',
-      objet: '',
-      description_operation: '',
-      statut: 'brouillon',
-      cee_data: {
-        profil_fonctionnement: '2x8h',
-        puissance_nominale: 0,
-        duree_contrat: 3,
-        coefficient_activite: 2,
-        facteur_f: 3,
-        kwh_cumac: 0,
-        tarif_kwh: 0.002,
-        prime_estimee: 0,
-        operateur_nom: 'TotalEnergies'
-      },
-      lignes: [],
-      total_ht: 0,
-      total_tva: 0,
-      total_ttc: 0,
-      prime_cee: 0,
-      reste_a_payer: 0,
-      commercial_id: '',
-      created_at: '',
-      updated_at: ''
-    }
+  const [ceeData, setCeeData] = useState<CEECalculation>({
+    profil_fonctionnement: '2x8h',
+    puissance_nominale: 0,
+    duree_contrat: 3,
+    coefficient_activite: 2,
+    facteur_f: 3,
+    kwh_cumac: 0,
+    tarif_kwh: 0.002,
+    prime_estimee: 0,
+    operateur_nom: 'TotalEnergies',
+    notes: ''
   })
 
-  const [activeTab, setActiveTab] = useState<'general' | 'cee' | 'lignes' | 'resume'>('general')
+  const statusOptions = [
+    { value: 'all', label: 'Tous les statuts' },
+    { value: 'brouillon', label: 'Brouillon' },
+    { value: 'envoye', label: 'Envoyé' },
+    { value: 'accepte', label: 'Accepté' },
+    { value: 'refuse', label: 'Refusé' },
+    { value: 'expire', label: 'Expiré' }
+  ]
 
-  // Calcul automatique des totaux
-  useEffect(() => {
-    const total_ht = formData.lignes.reduce((sum, ligne) => sum + ligne.prix_total, 0)
-    const total_tva = formData.lignes.reduce((sum, ligne) => sum + (ligne.prix_total * ligne.tva / 100), 0)
-    const total_ttc = total_ht + total_tva
-    const prime_cee = formData.cee_data.prime_estimee
-    const reste_a_payer = total_ttc - prime_cee
-
-    setFormData(prev => ({
-      ...prev,
-      total_ht,
-      total_tva,
-      total_ttc,
-      prime_cee,
-      reste_a_payer
-    }))
-  }, [formData.lignes, formData.cee_data.prime_estimee])
-
-  // Calcul CEE automatique
-  useEffect(() => {
-    const { puissance_nominale, coefficient_activite, facteur_f, tarif_kwh } = formData.cee_data
-    const kwh_cumac = 29.4 * coefficient_activite * puissance_nominale * facteur_f
-    const prime_estimee = kwh_cumac * tarif_kwh
-
-    setFormData(prev => ({
-      ...prev,
-      cee_data: {
-        ...prev.cee_data,
-        kwh_cumac,
-        prime_estimee
-      }
-    }))
-  }, [formData.cee_data.puissance_nominale, formData.cee_data.coefficient_activite, formData.cee_data.facteur_f, formData.cee_data.tarif_kwh])
-
-  // Génération du numéro automatique
-  useEffect(() => {
-    if (formData.client_id && !editingDevis) {
-      const client = clients.find(c => c.id === formData.client_id)
-      if (client) {
-        const year = new Date().getFullYear()
-        const clientCode = client.entreprise.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
-        const timestamp = Date.now().toString().slice(-4)
-        const numero = `CEE-${year}-${clientCode}-${timestamp}`
-        
-        setFormData(prev => ({ ...prev, numero }))
-      }
-    }
-  }, [formData.client_id, clients, editingDevis])
-
-  const addLigne = () => {
-    const newLigne: DevisLine = {
-      id: Date.now().toString(),
-      designation: '',
-      zone: 'Général',
-      quantite: 1,
-      prix_unitaire: 0,
-      prix_total: 0,
-      tva: 20,
-      type: 'materiel',
-      ordre: formData.lignes.length + 1
-    }
-    
-    setFormData(prev => ({
-      ...prev,
-      lignes: [...prev.lignes, newLigne]
-    }))
-  }
-
-  const updateLigne = (id: string, updates: Partial<DevisLine>) => {
-    setFormData(prev => ({
-      ...prev,
-      lignes: prev.lignes.map(ligne => {
-        if (ligne.id === id) {
-          const updated = { ...ligne, ...updates }
-          updated.prix_total = updated.quantite * updated.prix_unitaire
-          return updated
-        }
-        return ligne
-      })
-    }))
-  }
-
-  const deleteLigne = (id: string) => {
-    setFormData(prev => ({
-      ...prev,
-      lignes: prev.lignes.filter(ligne => ligne.id !== id)
-    }))
-  }
-
-  const handleSave = () => {
-    // Validation
-    if (!formData.client_id) {
-      alert('Veuillez sélectionner un client')
-      return
-    }
-    if (!formData.objet.trim()) {
-      alert('Veuillez saisir un objet')
-      return
-    }
-    if (formData.lignes.length === 0) {
-      alert('Veuillez ajouter au moins une ligne')
-      return
-    }
-
-    onSave({
-      ...formData,
-      id: editingDevis?.id || Date.now().toString()
-    })
-  }
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR'
-    }).format(amount)
-  }
-
-  const profilOptions = [
+  const profilsOptions = [
     { value: '1x8h', label: '1×8h (8h/jour)', coefficient: 1 },
     { value: '2x8h', label: '2×8h (16h/jour)', coefficient: 2 },
     { value: '3x8h_weekend_off', label: '3×8h sans weekend', coefficient: 2.5 },
@@ -780,94 +147,591 @@ function CEEDevisGenerator({ editingDevis, clients, onSave, onCancel }: CEEDevis
     { value: 'continu_24_7', label: 'Continu 24h/7j', coefficient: 3 }
   ]
 
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      if (!isSupabaseConfigured()) {
+        // Demo data
+        setClients([
+          {
+            id: '1',
+            nom: 'Jean Dupont',
+            entreprise: 'Industrie Verte SA',
+            siret: '12345678901234',
+            email: 'jean.dupont@industrie-verte.fr',
+            telephone: '01 23 45 67 89',
+            adresse: '123 Rue de la Paix',
+            ville: 'Paris',
+            code_postal: '75001',
+            pays: 'France',
+            contact_principal: 'Jean Dupont - Directeur Technique',
+            notes: 'Client premium',
+            commercial_id: profile?.id,
+            prospect_id: '1',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        
+        setArticles([
+          {
+            id: '1',
+            nom: 'Récupérateur de chaleur industriel',
+            description: 'Système de récupération de chaleur haute performance',
+            type: 'IPE',
+            prix_achat: 8000,
+            prix_vente: 12000,
+            tva: 20,
+            unite: 'unité',
+            fournisseur_id: '1',
+            actif: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        
+        setDevis([])
+        setLoading(false)
+        return
+      }
+
+      const [devisData, clientsData, articlesData] = await Promise.all([
+        supabase.from('devis').select(`
+          *,
+          client:clients(*)
+        `).eq('type', 'CEE').order('created_at', { ascending: false }),
+        supabase.from('clients').select('*').order('entreprise'),
+        supabase.from('articles').select('*').eq('actif', true).order('nom')
+      ])
+
+      if (devisData.error) throw devisData.error
+      if (clientsData.error) throw clientsData.error
+      if (articlesData.error) throw articlesData.error
+
+      setDevis(devisData.data || [])
+      setClients(clientsData.data || [])
+      setArticles(articlesData.data || [])
+    } catch (error) {
+      console.error('Error fetching data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const calculateCEE = () => {
+    const kwh_cumac = 29.4 * ceeData.coefficient_activite * ceeData.puissance_nominale * ceeData.facteur_f
+    const prime_estimee = kwh_cumac * ceeData.tarif_kwh
+    
+    setCeeData(prev => ({
+      ...prev,
+      kwh_cumac,
+      prime_estimee
+    }))
+
+    setFormData(prev => ({
+      ...prev,
+      cee_kwh_cumac: kwh_cumac,
+      cee_prix_unitaire: ceeData.tarif_kwh,
+      cee_montant_total: prime_estimee,
+      reste_a_payer_ht: prev.total_ht - prime_estimee
+    }))
+  }
+
+  const calculateTotals = () => {
+    const total_ht = formData.lignes_data.reduce((sum, ligne) => sum + ligne.prix_total, 0)
+    const total_tva = total_ht * (formData.tva_taux / 100)
+    const total_ttc = total_ht + total_tva
+    const reste_a_payer_ht = total_ht - formData.cee_montant_total
+
+    setFormData(prev => ({
+      ...prev,
+      total_ht,
+      total_tva,
+      total_ttc,
+      reste_a_payer_ht
+    }))
+  }
+
+  const addLigne = (article?: Article) => {
+    const newLigne: DevisLine = {
+      id: Date.now().toString(),
+      designation: article?.nom || '',
+      description: article?.description || '',
+      zone: 'Zone 1',
+      quantite: 1,
+      prix_unitaire: article?.prix_vente || 0,
+      prix_total: article?.prix_vente || 0,
+      tva: article?.tva || 20,
+      type: 'materiel',
+      ordre: formData.lignes_data.length + 1,
+      article_id: article?.id
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      lignes_data: [...prev.lignes_data, newLigne]
+    }))
+  }
+
+  const updateLigne = (id: string, updates: Partial<DevisLine>) => {
+    setFormData(prev => ({
+      ...prev,
+      lignes_data: prev.lignes_data.map(ligne => {
+        if (ligne.id === id) {
+          const updated = { ...ligne, ...updates }
+          if ('quantite' in updates || 'prix_unitaire' in updates) {
+            updated.prix_total = updated.quantite * updated.prix_unitaire
+          }
+          return updated
+        }
+        return ligne
+      })
+    }))
+  }
+
+  const removeLigne = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      lignes_data: prev.lignes_data.filter(ligne => ligne.id !== id)
+    }))
+  }
+
+  const handleSaveDevis = async () => {
+    if (!formData.client_id) {
+      alert('Veuillez sélectionner un client')
+      return
+    }
+
+    if (formData.lignes_data.length === 0) {
+      alert('Veuillez ajouter au moins une ligne au devis')
+      return
+    }
+
+    setSaving(true)
+    try {
+      console.log('=== DÉBUT SAUVEGARDE DEVIS ===')
+      console.log('Données du formulaire:', formData)
+      console.log('Données CEE:', ceeData)
+
+      // Préparer les données pour Supabase
+      const devisData = {
+        numero: formData.numero || `DEV-${Date.now()}`,
+        client_id: formData.client_id,
+        statut: formData.statut,
+        date_devis: formData.date_devis,
+        date_validite: formData.date_validite,
+        objet: formData.objet,
+        description_operation: formData.description_operation,
+        total_ht: formData.total_ht,
+        total_tva: formData.total_tva,
+        total_ttc: formData.total_ttc,
+        tva_taux: formData.tva_taux,
+        cee_kwh_cumac: formData.cee_kwh_cumac,
+        cee_prix_unitaire: formData.cee_prix_unitaire,
+        cee_montant_total: formData.cee_montant_total,
+        reste_a_payer_ht: formData.reste_a_payer_ht,
+        remarques: formData.remarques,
+        type: 'CEE',
+        modalites_paiement: formData.modalites_paiement,
+        garantie: formData.garantie,
+        penalites: formData.penalites,
+        clause_juridique: formData.clause_juridique,
+        delais: formData.delais,
+        lignes_data: formData.lignes_data,
+        cee_data: ceeData,
+        commercial_id: profile?.id
+      }
+
+      console.log('Données nettoyées pour Supabase:', devisData)
+
+      if (!isSupabaseConfigured()) {
+        const newDevis = {
+          ...devisData,
+          id: Date.now().toString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+        setDevis([newDevis, ...devis])
+        setShowForm(false)
+        resetForm()
+        alert('Devis sauvegardé avec succès (mode démo)')
+        return
+      }
+
+      let result
+      if (editingDevis?.id) {
+        // Mise à jour
+        result = await supabase
+          .from('devis')
+          .update(devisData)
+          .eq('id', editingDevis.id)
+          .select(`
+            *,
+            client:clients(*)
+          `)
+          .single()
+      } else {
+        // Création
+        result = await supabase
+          .from('devis')
+          .insert([devisData])
+          .select(`
+            *,
+            client:clients(*)
+          `)
+          .single()
+      }
+
+      if (result.error) {
+        console.error('Erreur Supabase:', result.error)
+        throw result.error
+      }
+
+      console.log('Devis sauvegardé:', result.data)
+
+      // Mettre à jour la liste
+      if (editingDevis?.id) {
+        setDevis(devis.map(d => d.id === editingDevis.id ? result.data : d))
+      } else {
+        setDevis([result.data, ...devis])
+      }
+
+      setShowForm(false)
+      resetForm()
+      alert('Devis sauvegardé avec succès')
+
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde:', error)
+      alert(`Erreur lors de la sauvegarde: ${error.message || 'Erreur inconnue'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      client_id: '',
+      statut: 'brouillon',
+      date_devis: new Date().toISOString().split('T')[0],
+      date_validite: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      objet: 'Devis CEE - Décarbonation industrielle',
+      description_operation: '',
+      total_ht: 0,
+      total_tva: 0,
+      total_ttc: 0,
+      tva_taux: 20,
+      cee_kwh_cumac: 0,
+      cee_prix_unitaire: 0.002,
+      cee_montant_total: 0,
+      reste_a_payer_ht: 0,
+      remarques: '',
+      type: 'CEE',
+      modalites_paiement: '30% à la commande, 70% à la livraison',
+      garantie: '2 ans pièces et main d\'œuvre',
+      penalites: 'Pénalités de retard : 0,1% par jour de retard',
+      clause_juridique: 'Tout litige relève de la compétence du Tribunal de Commerce de Paris',
+      delais: '4 à 6 semaines après validation du devis',
+      lignes_data: []
+    })
+    setCeeData({
+      profil_fonctionnement: '2x8h',
+      puissance_nominale: 0,
+      duree_contrat: 3,
+      coefficient_activite: 2,
+      facteur_f: 3,
+      kwh_cumac: 0,
+      tarif_kwh: 0.002,
+      prime_estimee: 0,
+      operateur_nom: 'TotalEnergies',
+      notes: ''
+    })
+    setEditingDevis(null)
+  }
+
+  const handleCreateClient = async (clientData: Partial<Client>) => {
+    try {
+      if (!isSupabaseConfigured()) {
+        const newClient: Client = {
+          id: Date.now().toString(),
+          ...clientData,
+          commercial_id: profile?.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as Client
+        setClients([newClient, ...clients])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('clients')
+        .insert([{ ...clientData, commercial_id: profile?.id }])
+        .select()
+        .single()
+
+      if (error) throw error
+      setClients([data, ...clients])
+    } catch (error) {
+      console.error('Error creating client:', error)
+      throw error
+    }
+  }
+
+  const handleCreateArticle = async (articleData: Partial<Article>) => {
+    try {
+      if (!isSupabaseConfigured()) {
+        const newArticle: Article = {
+          id: Date.now().toString(),
+          ...articleData,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as Article
+        setArticles([newArticle, ...articles])
+        return newArticle
+      }
+
+      const { data, error } = await supabase
+        .from('articles')
+        .insert([articleData])
+        .select()
+        .single()
+
+      if (error) throw error
+      setArticles([data, ...articles])
+      return data
+    } catch (error) {
+      console.error('Error creating article:', error)
+      throw error
+    }
+  }
+
+  // Recalculer les totaux quand les lignes changent
+  useEffect(() => {
+    calculateTotals()
+  }, [formData.lignes_data, formData.tva_taux, formData.cee_montant_total])
+
+  const filteredDevis = devis.filter(d => {
+    const searchLower = searchTerm.toLowerCase()
+    const matchesSearch = d.numero?.toLowerCase().includes(searchLower) ||
+                         d.objet?.toLowerCase().includes(searchLower) ||
+                         d.client?.entreprise?.toLowerCase().includes(searchLower)
+    const matchesStatus = statusFilter === 'all' || d.statut === statusFilter
+    return matchesSearch && matchesStatus
+  })
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: 'EUR'
+    }).format(value)
+  }
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-yellow-50 to-yellow-100">
-          <div className="flex items-center">
-            <div className="h-12 w-12 bg-gradient-to-r from-yellow-600 to-yellow-700 rounded-lg flex items-center justify-center mr-4">
-              <Zap className="text-white h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                {editingDevis ? 'Modifier le devis CEE' : 'Nouveau devis CEE'}
-              </h2>
-              <p className="text-gray-600">Avec calculateur IND-UT-134 intégré</p>
-            </div>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+              <FileText className="h-8 w-8 mr-3 text-blue-600" />
+              Devis CEE
+            </h1>
+            <p className="text-gray-600 mt-1">
+              Gestion des devis Certificats d'Économies d'Énergie
+            </p>
           </div>
           <button
-            onClick={onCancel}
-            className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-50"
+            onClick={() => {
+              resetForm()
+              setShowForm(true)
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
           >
-            <X className="h-6 w-6" />
+            <Plus className="h-4 w-4 mr-2" />
+            Nouveau devis CEE
           </button>
         </div>
+      </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 bg-gray-50">
-          {[
-            { id: 'general', label: 'Informations générales', icon: FileText },
-            { id: 'cee', label: 'Calcul CEE', icon: Calculator },
-            { id: 'lignes', label: 'Lignes du devis', icon: List },
-            { id: 'resume', label: 'Résumé', icon: Eye }
-          ].map(tab => {
-            const Icon = tab.icon
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`px-6 py-3 text-sm font-medium flex items-center transition-colors ${
-                  activeTab === tab.id
-                    ? 'text-yellow-600 border-b-2 border-yellow-600 bg-white'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <Icon className="h-4 w-4 mr-2" />
-                {tab.label}
-              </button>
-            )
-          })}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Tab: Informations générales */}
-          {activeTab === 'general' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Client *
-                  </label>
-                  <select
-                    value={formData.client_id}
-                    onChange={(e) => setFormData(prev => ({ ...prev, client_id: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                    required
-                  >
-                    <option value="">Sélectionner un client</option>
-                    {clients.map(client => (
-                      <option key={client.id} value={client.id}>
-                        {client.entreprise} - {client.nom}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Numéro de devis
-                  </label>
+      {!showForm ? (
+        <>
+          {/* Filters */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
                     type="text"
-                    value={formData.numero}
-                    onChange={(e) => setFormData(prev => ({ ...prev, numero: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                    placeholder="Généré automatiquement"
+                    placeholder="Rechercher par numéro, objet ou client..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
+              </div>
+              <div className="sm:w-48">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {statusOptions.map((status) => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
 
+          {/* Devis Table */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Numéro
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Client
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Objet
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Montant HT
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Prime CEE
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Statut
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredDevis.map((devisItem) => (
+                    <tr key={devisItem.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{devisItem.numero}</div>
+                        <div className="text-sm text-gray-500">
+                          {new Date(devisItem.date_devis || '').toLocaleDateString('fr-FR')}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{devisItem.client?.entreprise}</div>
+                        <div className="text-sm text-gray-500">{devisItem.client?.nom}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-gray-900">{devisItem.objet}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {formatCurrency(devisItem.total_ht || 0)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-green-600">
+                          {formatCurrency(devisItem.cee_montant_total || 0)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          devisItem.statut === 'brouillon' ? 'bg-gray-100 text-gray-800' :
+                          devisItem.statut === 'envoye' ? 'bg-blue-100 text-blue-800' :
+                          devisItem.statut === 'accepte' ? 'bg-green-100 text-green-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {statusOptions.find(s => s.value === devisItem.statut)?.label}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center justify-end space-x-2">
+                          <button
+                            className="text-blue-600 hover:text-blue-900 p-1 rounded"
+                            title="Voir les détails"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingDevis(devisItem)
+                              setFormData(devisItem)
+                              setShowForm(true)
+                            }}
+                            className="text-indigo-600 hover:text-indigo-900 p-1 rounded"
+                            title="Modifier"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredDevis.length === 0 && (
+              <div className="text-center py-12">
+                <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">Aucun devis CEE</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Commencez par créer votre premier devis CEE.
+                </p>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        /* Formulaire de devis */
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {editingDevis ? 'Modifier le devis CEE' : 'Nouveau devis CEE'}
+            </h2>
+            <button
+              onClick={() => {
+                setShowForm(false)
+                resetForm()
+              }}
+              className="text-gray-400 hover:text-gray-600 p-1 rounded"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-8">
+            {/* Sélection du client */}
+            <ClientSelector
+              clients={clients}
+              selectedClient={clients.find(c => c.id === formData.client_id) || null}
+              onSelectClient={(client) => setFormData(prev => ({ ...prev, client_id: client.id }))}
+              onCreateClient={handleCreateClient}
+            />
+
+            {/* Informations générales */}
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Informations générales</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Date du devis
@@ -876,10 +740,9 @@ function CEEDevisGenerator({ editingDevis, clients, onSave, onCancel }: CEEDevis
                     type="date"
                     value={formData.date_devis}
                     onChange={(e) => setFormData(prev => ({ ...prev, date_devis: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Date de validité
@@ -888,477 +751,295 @@ function CEEDevisGenerator({ editingDevis, clients, onSave, onCancel }: CEEDevis
                     type="date"
                     value={formData.date_validite}
                     onChange={(e) => setFormData(prev => ({ ...prev, date_validite: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Objet du devis
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.objet}
+                    onChange={(e) => setFormData(prev => ({ ...prev, objet: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Objet du devis"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description de l'opération
+                  </label>
+                  <textarea
+                    value={formData.description_operation}
+                    onChange={(e) => setFormData(prev => ({ ...prev, description_operation: e.target.value }))}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Description détaillée de l'opération"
                   />
                 </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Objet du devis *
-                </label>
-                <input
-                  type="text"
-                  value={formData.objet}
-                  onChange={(e) => setFormData(prev => ({ ...prev, objet: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                  placeholder="Ex: Installation système efficacité énergétique"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description de l'opération
-                </label>
-                <textarea
-                  value={formData.description_operation}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description_operation: e.target.value }))}
-                  rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                  placeholder="Décrivez l'opération d'efficacité énergétique à réaliser..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Statut
-                </label>
-                <select
-                  value={formData.statut}
-                  onChange={(e) => setFormData(prev => ({ ...prev, statut: e.target.value as any }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                >
-                  <option value="brouillon">Brouillon</option>
-                  <option value="envoye">Envoyé</option>
-                  <option value="accepte">Accepté</option>
-                  <option value="refuse">Refusé</option>
-                  <option value="expire">Expiré</option>
-                </select>
-              </div>
             </div>
-          )}
 
-          {/* Tab: Calcul CEE */}
-          {activeTab === 'cee' && (
-            <div className="space-y-6">
-              <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
-                <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center">
-                  <Calculator className="h-5 w-5 mr-2" />
-                  Calculateur CEE - Fiche IND-UT-134
-                </h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Profil de fonctionnement
-                    </label>
-                    <select
-                      value={formData.cee_data.profil_fonctionnement}
-                      onChange={(e) => {
-                        const profil = profilOptions.find(p => p.value === e.target.value)
-                        setFormData(prev => ({
-                          ...prev,
-                          cee_data: {
-                            ...prev.cee_data,
-                            profil_fonctionnement: e.target.value as any,
-                            coefficient_activite: profil?.coefficient || 1
-                          }
-                        }))
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                    >
-                      {profilOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Puissance nominale (kW)
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.cee_data.puissance_nominale}
-                      onChange={(e) => setFormData(prev => ({
+            {/* Calculateur CEE */}
+            <div className="bg-yellow-50 rounded-lg p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                <Zap className="h-5 w-5 mr-2 text-yellow-600" />
+                Calculateur CEE
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Profil de fonctionnement
+                  </label>
+                  <select
+                    value={ceeData.profil_fonctionnement}
+                    onChange={(e) => {
+                      const profil = profilsOptions.find(p => p.value === e.target.value)
+                      setCeeData(prev => ({
                         ...prev,
-                        cee_data: { ...prev.cee_data, puissance_nominale: parseFloat(e.target.value) || 0 }
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                      step="0.1"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Durée d'engagement (années)
-                    </label>
-                    <select
-                      value={formData.cee_data.duree_contrat}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        cee_data: {
-                          ...prev.cee_data,
-                          duree_contrat: parseFloat(e.target.value),
-                          facteur_f: parseFloat(e.target.value)
-                        }
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                    >
-                      <option value="1">1 an</option>
-                      <option value="2">2 ans</option>
-                      <option value="3">3 ans</option>
-                      <option value="4">4 ans</option>
-                      <option value="5">5 ans</option>
-                      <option value="5.45">5,45 ans (max)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Tarif CEE (€/kWh cumac)
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.cee_data.tarif_kwh}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        cee_data: { ...prev.cee_data, tarif_kwh: parseFloat(e.target.value) || 0 }
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                      step="0.001"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Opérateur CEE
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.cee_data.operateur_nom}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        cee_data: { ...prev.cee_data, operateur_nom: e.target.value }
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                      placeholder="TotalEnergies, EDF, etc."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Notes CEE
-                    </label>
-                    <textarea
-                      value={formData.cee_data.notes || ''}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        cee_data: { ...prev.cee_data, notes: e.target.value }
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                      rows={3}
-                      placeholder="Commentaires sur le calcul CEE..."
-                    />
-                  </div>
-                </div>
-
-                {/* Résultats du calcul */}
-                <div className="mt-6 bg-white p-4 rounded-lg border border-yellow-300">
-                  <h4 className="font-medium text-gray-900 mb-3">Résultats du calcul CEE</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-yellow-600">
-                        {formData.cee_data.kwh_cumac.toLocaleString('fr-FR')}
-                      </div>
-                      <div className="text-sm text-gray-600">kWh cumac</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-green-600">
-                        {formatCurrency(formData.cee_data.prime_estimee)}
-                      </div>
-                      <div className="text-sm text-gray-600">Prime CEE</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg text-gray-700">
-                        Coefficient: {formData.cee_data.coefficient_activite}
-                      </div>
-                      <div className="text-sm text-gray-600">Activité</div>
-                    </div>
-                  </div>
-                  <div className="mt-3 text-xs text-gray-500 text-center">
-                    Formule: kWh cumac = 29.4 × {formData.cee_data.coefficient_activite} × {formData.cee_data.puissance_nominale} × {formData.cee_data.facteur_f}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Tab: Lignes du devis */}
-          {activeTab === 'lignes' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-gray-900">Lignes du devis</h3>
-                <button
-                  onClick={addLigne}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Ajouter une ligne
-                </button>
-              </div>
-
-              {formData.lignes.length === 0 ? (
-                <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg">
-                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">Aucune ligne ajoutée</p>
-                  <button
-                    onClick={addLigne}
-                    className="mt-4 text-blue-600 hover:text-blue-800"
+                        profil_fonctionnement: e.target.value as any,
+                        coefficient_activite: profil?.coefficient || 2
+                      }))
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    Ajouter la première ligne
+                    {profilsOptions.map(profil => (
+                      <option key={profil.value} value={profil.value}>
+                        {profil.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Puissance nominale (kW)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={ceeData.puissance_nominale}
+                    onChange={(e) => setCeeData(prev => ({ ...prev, puissance_nominale: parseFloat(e.target.value) || 0 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Durée d'engagement (années)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1"
+                    max="5.45"
+                    value={ceeData.duree_contrat}
+                    onChange={(e) => setCeeData(prev => ({ ...prev, duree_contrat: parseFloat(e.target.value) || 3, facteur_f: parseFloat(e.target.value) || 3 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tarif CEE (€/kWh cumac)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={ceeData.tarif_kwh}
+                    onChange={(e) => setCeeData(prev => ({ ...prev, tarif_kwh: parseFloat(e.target.value) || 0.002 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <button
+                    type="button"
+                    onClick={calculateCEE}
+                    className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center"
+                  >
+                    <Calculator className="h-4 w-4 mr-2" />
+                    Calculer les CEE
                   </button>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {formData.lignes.map((ligne, index) => (
-                    <div key={ligne.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                        <div className="md:col-span-3">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Désignation
-                          </label>
+              </div>
+              
+              {ceeData.kwh_cumac > 0 && (
+                <div className="mt-4 p-4 bg-white rounded-lg">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">kWh cumac:</span>
+                      <span className="ml-2 font-medium">{ceeData.kwh_cumac.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Prime estimée:</span>
+                      <span className="ml-2 font-medium text-green-600">{formatCurrency(ceeData.prime_estimee)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Opérateur:</span>
+                      <span className="ml-2 font-medium">{ceeData.operateur_nom}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Lignes du devis */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Lignes du devis</h3>
+                <div className="flex space-x-2">
+                  <ArticleSelector
+                    articles={articles}
+                    onSelectArticle={addLigne}
+                    onCreateArticle={handleCreateArticle}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addLigne()}
+                    className="bg-gray-600 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center text-sm"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Ligne vide
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Désignation</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Zone</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qté</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix unit.</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {formData.lignes_data.map((ligne) => (
+                      <tr key={ligne.id}>
+                        <td className="px-4 py-3">
                           <input
                             type="text"
                             value={ligne.designation}
                             onChange={(e) => updateLigne(ligne.id, { designation: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Nom de l'article"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                            placeholder="Désignation"
                           />
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Zone
-                          </label>
-                          <select
+                          {ligne.description && (
+                            <input
+                              type="text"
+                              value={ligne.description}
+                              onChange={(e) => updateLigne(ligne.id, { description: e.target.value })}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs mt-1"
+                              placeholder="Description"
+                            />
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
                             value={ligne.zone}
                             onChange={(e) => updateLigne(ligne.id, { zone: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="Général">Général</option>
-                            <option value="Étude">Étude</option>
-                            <option value="Matériel">Matériel</option>
-                            <option value="Installation">Installation</option>
-                            <option value="Mise en service">Mise en service</option>
-                            <option value="Formation">Formation</option>
-                            <option value="Maintenance">Maintenance</option>
-                          </select>
-                        </div>
-
-                        <div className="md:col-span-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Qté
-                          </label>
-                          <input
-                            type="number"
-                            value={ligne.quantite}
-                            onChange={(e) => updateLigne(ligne.id, { quantite: parseFloat(e.target.value) || 1 })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            min="1"
-                            step="0.1"
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
                           />
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Prix unitaire HT
-                          </label>
+                        </td>
+                        <td className="px-4 py-3">
                           <input
                             type="number"
+                            step="0.01"
+                            value={ligne.quantite}
+                            onChange={(e) => updateLigne(ligne.id, { quantite: parseFloat(e.target.value) || 0 })}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            step="0.01"
                             value={ligne.prix_unitaire}
                             onChange={(e) => updateLigne(ligne.id, { prix_unitaire: parseFloat(e.target.value) || 0 })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            step="0.01"
+                            className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
                           />
-                        </div>
-
-                        <div className="md:col-span-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            TVA %
-                          </label>
-                          <select
-                            value={ligne.tva}
-                            onChange={(e) => updateLigne(ligne.id, { tva: parseFloat(e.target.value) })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="0">0%</option>
-                            <option value="5.5">5,5%</option>
-                            <option value="10">10%</option>
-                            <option value="20">20%</option>
-                          </select>
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Total HT
-                          </label>
-                          <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-right font-medium">
-                            {formatCurrency(ligne.prix_total)}
-                          </div>
-                        </div>
-
-                        <div className="md:col-span-1 flex justify-end">
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-sm font-medium">{formatCurrency(ligne.prix_total)}</span>
+                        </td>
+                        <td className="px-4 py-3">
                           <button
-                            onClick={() => deleteLigne(ligne.id)}
-                            className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50"
-                            title="Supprimer la ligne"
+                            type="button"
+                            onClick={() => removeLigne(ligne.id)}
+                            className="text-red-600 hover:text-red-900 p-1 rounded"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
-                        </div>
-                      </div>
-
-                      {/* Description optionnelle */}
-                      <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Description (optionnelle)
-                        </label>
-                        <textarea
-                          value={ligne.description || ''}
-                          onChange={(e) => updateLigne(ligne.id, { description: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          rows={2}
-                          placeholder="Description détaillée de l'article..."
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab: Résumé */}
-          {activeTab === 'resume' && (
-            <div className="space-y-6">
-              {/* Informations client */}
-              {formData.client_id && (
-                <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
-                  <h3 className="text-lg font-semibold text-blue-900 mb-4 flex items-center">
-                    <User className="h-5 w-5 mr-2" />
-                    Client
-                  </h3>
-                  {(() => {
-                    const client = clients.find(c => c.id === formData.client_id)
-                    return client ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <div className="font-medium">{client.entreprise}</div>
-                          <div className="text-sm text-blue-700">{client.nom}</div>
-                        </div>
-                        <div>
-                          {client.email && <div className="text-sm">{client.email}</div>}
-                          {client.telephone && <div className="text-sm">{client.telephone}</div>}
-                        </div>
-                      </div>
-                    ) : null
-                  })()}
-                </div>
-              )}
-
-              {/* Résumé CEE */}
-              <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
-                <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center">
-                  <Zap className="h-5 w-5 mr-2" />
-                  Calcul CEE (IND-UT-134)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-yellow-600">
-                      {formData.cee_data.kwh_cumac.toLocaleString('fr-FR')}
-                    </div>
-                    <div className="text-sm text-gray-600">kWh cumac</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-green-600">
-                      {formatCurrency(formData.prime_cee)}
-                    </div>
-                    <div className="text-sm text-gray-600">Prime CEE</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg text-gray-700">
-                      {formData.cee_data.puissance_nominale} kW
-                    </div>
-                    <div className="text-sm text-gray-600">Puissance</div>
-                  </div>
-                </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            </div>
 
-              {/* Totaux financiers */}
-              <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-                <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center">
-                  <Euro className="h-5 w-5 mr-2" />
-                  Résumé financier
-                </h3>
-                <div className="space-y-3">
+            {/* Totaux */}
+            <div className="bg-gray-50 rounded-lg p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Récapitulatif financier</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
                   <div className="flex justify-between">
-                    <span>Total HT</span>
+                    <span>Total HT:</span>
                     <span className="font-medium">{formatCurrency(formData.total_ht)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>TVA</span>
+                    <span>TVA ({formData.tva_taux}%):</span>
                     <span className="font-medium">{formatCurrency(formData.total_tva)}</span>
                   </div>
-                  <div className="flex justify-between border-t border-green-200 pt-3">
-                    <span className="font-semibold">Total TTC</span>
-                    <span className="font-bold text-lg">{formatCurrency(formData.total_ttc)}</span>
+                  <div className="flex justify-between text-lg font-bold border-t pt-2">
+                    <span>Total TTC:</span>
+                    <span>{formatCurrency(formData.total_ttc)}</span>
                   </div>
-                  <div className="flex justify-between text-green-700">
-                    <span>Prime CEE</span>
-                    <span className="font-medium">- {formatCurrency(formData.prime_cee)}</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-green-600">
+                    <span>Prime CEE:</span>
+                    <span className="font-medium">- {formatCurrency(formData.cee_montant_total)}</span>
                   </div>
-                  <div className="flex justify-between border-t border-green-300 pt-3 text-lg">
-                    <span className="font-bold">Reste à payer</span>
-                    <span className="font-bold text-green-800">{formatCurrency(formData.reste_a_payer)}</span>
+                  <div className="flex justify-between text-lg font-bold border-t pt-2">
+                    <span>Reste à payer HT:</span>
+                    <span>{formatCurrency(formData.reste_a_payer_ht)}</span>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Lignes par zone */}
-              {formData.lignes.length > 0 && (
-                <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                    <FileText className="h-5 w-5 mr-2" />
-                    Détail des prestations
-                  </h3>
-                  {Object.entries(
-                    formData.lignes.reduce((acc, ligne) => {
-                      if (!acc[ligne.zone]) acc[ligne.zone] = []
-                      acc[ligne.zone].push(ligne)
-                      return acc
-                    }, {} as Record<string, DevisLine[]>)
-                  ).map(([zone, lignes]) => (
-                    <div key={zone} className="mb-4">
-                      <h4 className="font-medium text-gray-800 mb-2">{zone}</h4>
-                      <div className="space-y-1">
-                        {lignes.map(ligne => (
-                          <div key={ligne.id} className="flex justify-between text-sm">
-                            <span>{ligne.designation}</span>
-                            <span className="font-medium">{formatCurrency(ligne.prix_total)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Actions */}
+            <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false)
+                  resetForm()
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDevis}
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50"
+              >
+                {saving ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                {saving ? 'Sauvegarde...' : 'Enregistrer le devis'}
+              </button>
             </div>
-          )}
-            </div>
+          </div>
+        </div>
+      )}
     </div>
-    </div>
-  )}
+  )
+}
